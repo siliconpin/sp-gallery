@@ -24,13 +24,14 @@ class _MediaViewerState extends State<MediaViewer> {
   late PageController _pageController;
   VideoPlayerController? _videoController;
   int _currentIndex = 0;
+  bool _isVideo = false;
 
   @override
   void initState() {
     super.initState();
     _currentIndex = widget.initialIndex;
     _pageController = PageController(initialPage: widget.initialIndex);
-    _loadVideo();
+    _loadMedia();
   }
 
   @override
@@ -40,9 +41,11 @@ class _MediaViewerState extends State<MediaViewer> {
     super.dispose();
   }
 
-  void _loadVideo() {
+  void _loadMedia() {
     final currentItem = widget.mediaItems[_currentIndex];
-    if (currentItem.isVideo) {
+    _isVideo = currentItem.isVideo;
+
+    if (_isVideo) {
       _videoController?.dispose();
       final path = currentItem.entity.relativePath;
       if (path != null) {
@@ -59,6 +62,13 @@ class _MediaViewerState extends State<MediaViewer> {
     }
   }
 
+  void _onPageChanged(int index) {
+    setState(() {
+      _currentIndex = index;
+    });
+    _loadMedia();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -73,52 +83,83 @@ class _MediaViewerState extends State<MediaViewer> {
       ),
       body: PageView.builder(
         controller: _pageController,
+        onPageChanged: _onPageChanged,
         itemCount: widget.mediaItems.length,
-        onPageChanged: (index) {
-          setState(() {
-            _currentIndex = index;
-          });
-          _loadVideo();
-        },
         itemBuilder: (context, index) {
           final mediaItem = widget.mediaItems[index];
-          return Center(
-            child: mediaItem.isVideo
-                ? _buildVideoViewer(mediaItem)
-                : _buildImageViewer(mediaItem),
+          return _MediaItemViewer(
+            mediaItem: mediaItem,
+            isVideo: mediaItem.isVideo,
+            videoController: mediaItem.isVideo ? _videoController : null,
           );
         },
       ),
     );
   }
+}
 
-  Widget _buildImageViewer(MediaItem mediaItem) {
-    return FutureBuilder<Uint8List?>(
-      future: mediaItem.entity.originBytes,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.done &&
-            snapshot.data != null) {
-          return Image.memory(
-            snapshot.data!,
-            fit: BoxFit.contain,
-          );
-        }
-        return const Center(
-          child: CircularProgressIndicator(color: Colors.white),
-        );
-      },
-    );
-  }
+class _MediaItemViewer extends StatelessWidget {
+  final MediaItem mediaItem;
+  final bool isVideo;
+  final VideoPlayerController? videoController;
 
-  Widget _buildVideoViewer(MediaItem mediaItem) {
-    if (_videoController != null && _videoController!.value.isInitialized) {
-      return AspectRatio(
-        aspectRatio: _videoController!.value.aspectRatio,
-        child: VideoPlayer(_videoController!),
+  const _MediaItemViewer({
+    required this.mediaItem,
+    required this.isVideo,
+    this.videoController,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (isVideo && videoController != null) {
+      return Center(
+        child: AspectRatio(
+          aspectRatio: videoController!.value.aspectRatio,
+          child: VideoPlayer(videoController!),
+        ),
       );
     }
-    return const Center(
-      child: CircularProgressIndicator(color: Colors.white),
+
+    return Center(
+      child: InteractiveViewer(
+        minScale: 0.5,
+        maxScale: 4.0,
+        boundaryMargin: const EdgeInsets.all(20),
+        child: FutureBuilder<Uint8List?>(
+          future: mediaItem.entity.originBytes,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const Center(
+                child: CircularProgressIndicator(color: Colors.white),
+              );
+            }
+
+            if (snapshot.hasError || !snapshot.hasData || snapshot.data == null) {
+              return const Center(
+                child: Icon(
+                  Icons.error_outline,
+                  color: Colors.white,
+                  size: 64,
+                ),
+              );
+            }
+
+            return Image.memory(
+              snapshot.data!,
+              fit: BoxFit.contain,
+              errorBuilder: (context, error, stackTrace) {
+                return const Center(
+                  child: Icon(
+                    Icons.error_outline,
+                    color: Colors.white,
+                    size: 64,
+                  ),
+                );
+              },
+            );
+          },
+        ),
+      ),
     );
   }
 }
